@@ -14,19 +14,32 @@ MAX_PRICE_NAME = re.compile("Maximum Value", re.I)
 
 
 class SearchResultsPage(BasePage):
-    # Current eBay SRP template (verified live): semantic BEM classes on div wrappers.
-    RESULT_ITEM_XPATH = "//div[contains(concat(' ', normalize-space(@class), ' '), ' su-item-card ')]"
-    ITEM_LINK_XPATH = ".//a[contains(@class,'su-media-container__link')]"
-    ITEM_PRICE_XPATH = ".//span[contains(@class,'su-item-card__price')]"
-
-    # eBay occasionally A/B-tests an older list-based SRP template.
-    LEGACY_ITEM_XPATH = "//li[contains(concat(' ', normalize-space(@class), ' '), ' s-item ')]"
-    LEGACY_ITEM_LINK_XPATH = ".//a[contains(@class,'s-item__link')]"
-    LEGACY_ITEM_PRICE_XPATH = ".//span[contains(@class,'s-item__price')]"
+    # eBay SRP templates, tried in order until one yields cards. eBay rotates/A-B-tests
+    # these, so keep prior templates as fallbacks rather than deleting them.
+    CARD_TEMPLATES = {
+        # Verified live 2026-07-19: <li class="s-card s-card--vertical">.
+        "s-card": {
+            "item": "//li[contains(concat(' ', normalize-space(@class), ' '), ' s-card ')]",
+            "link": ".//a[contains(@class,'s-card__link')]",
+            "price": ".//span[contains(@class,'s-card__price')]",
+        },
+        # Previously-seen BEM div-wrapper template.
+        "su-item-card": {
+            "item": "//div[contains(concat(' ', normalize-space(@class), ' '), ' su-item-card ')]",
+            "link": ".//a[contains(@class,'su-media-container__link')]",
+            "price": ".//span[contains(@class,'su-item-card__price')]",
+        },
+        # Older list-based SRP template.
+        "s-item": {
+            "item": "//li[contains(concat(' ', normalize-space(@class), ' '), ' s-item ')]",
+            "link": ".//a[contains(@class,'s-item__link')]",
+            "price": ".//span[contains(@class,'s-item__price')]",
+        },
+    }
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self._card_template = "current"
+        self._card_template = "s-card"
 
     async def apply_price_filter(self, max_price: float, min_price: float | None = None) -> bool:
         try:
@@ -44,19 +57,16 @@ class SearchResultsPage(BasePage):
             return False
 
     async def get_item_cards(self) -> list[Locator]:
-        primary = self.page.locator(f"xpath={self.RESULT_ITEM_XPATH}")
-        count = await primary.count()
-        if count > 0:
-            self._card_template = "current"
-            return [primary.nth(i) for i in range(count)]
-
-        legacy = self.page.locator(f"xpath={self.LEGACY_ITEM_XPATH}")
-        count = await legacy.count()
-        self._card_template = "legacy"
-        return [legacy.nth(i) for i in range(count)]
+        for name, xpaths in self.CARD_TEMPLATES.items():
+            locator = self.page.locator(f"xpath={xpaths['item']}")
+            count = await locator.count()
+            if count > 0:
+                self._card_template = name
+                return [locator.nth(i) for i in range(count)]
+        return []
 
     async def extract_price(self, card: Locator) -> float | None:
-        xpath = self.ITEM_PRICE_XPATH if self._card_template == "current" else self.LEGACY_ITEM_PRICE_XPATH
+        xpath = self.CARD_TEMPLATES[self._card_template]["price"]
         price_locator = card.locator(f"xpath={xpath}")
         if await price_locator.count() == 0:
             return None
@@ -66,7 +76,7 @@ class SearchResultsPage(BasePage):
         return parse_price(text)
 
     async def extract_url(self, card: Locator) -> str | None:
-        xpath = self.ITEM_LINK_XPATH if self._card_template == "current" else self.LEGACY_ITEM_LINK_XPATH
+        xpath = self.CARD_TEMPLATES[self._card_template]["link"]
         link_locator = card.locator(f"xpath={xpath}")
         if await link_locator.count() == 0:
             return None
