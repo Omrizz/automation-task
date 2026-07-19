@@ -2,7 +2,4 @@ __pycache__/
 *.pyc
 .venv/
 venv/
-report.html
-screenshots/
-traces/
 .pytest_cache/
